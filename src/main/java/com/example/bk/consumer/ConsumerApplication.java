@@ -1,4 +1,4 @@
-package com.example.bk.reader;
+package com.example.bk.consumer;
 
 import com.example.bk.Customer;
 import lombok.RequiredArgsConstructor;
@@ -21,63 +21,55 @@ import java.util.List;
 import java.util.Properties;
 
 @Log4j2
-@EnableBatchProcessing
 @SpringBootApplication
 @RequiredArgsConstructor
-public class ReaderApplication {
+@EnableBatchProcessing
+public class ConsumerApplication {
 
-
-	public static void main(String[] args) {
-		SpringApplication.run(ReaderApplication.class, args);
+	public static void main(String args[]) {
+		SpringApplication.run(ConsumerApplication.class, args);
 	}
 
-	private final StepBuilderFactory stepBuilder;
-	private final JobBuilderFactory jobBuilder;
-	private final KafkaProperties kp;
+	private final KafkaProperties properties;
+	private final StepBuilderFactory stepBuilderFactory;
+	private final JobBuilderFactory jobBuilderFactory;
 
 	@Bean
-	Step one() {
+	Job job() {
+		return jobBuilderFactory.get("job")
+			.incrementer(new RunIdIncrementer())
+			.start(start())
+			.build();
 
+	}
+
+	@Bean
+	KafkaItemReader<Long, Customer> kafkaItemReader() {
+		var props = new Properties();
+		props.putAll(this.properties.buildConsumerProperties());
+
+		return new KafkaItemReaderBuilder<Long, Customer>()
+			.partitions(0)
+			.consumerProperties(props)
+			.name("customers-reader")
+			.saveState(true)
+			.topic("customers")
+			.build();
+	}
+
+	@Bean
+	Step start() {
 		var writer = new ItemWriter<Customer>() {
 			@Override
 			public void write(List<? extends Customer> items) throws Exception {
-				items.forEach(log::info);
+				items.forEach(it -> log.info("new customer: " + it));
 			}
 		};
-		return this.stepBuilder
-			.get("one")
+		return stepBuilderFactory
+			.get("step")
 			.<Customer, Customer>chunk(10)
-			.reader(this.kafkaItemReader())
 			.writer(writer)
+			.reader(kafkaItemReader())
 			.build();
 	}
-
-
-	@Bean
-	KafkaItemReader<String, Customer> kafkaItemReader() {
-
-		var properties = new Properties();
-		properties.putAll(kp.buildConsumerProperties());
-
-		return new KafkaItemReaderBuilder<String, Customer>()
-			.topic("customers")
-			.consumerProperties(properties)
-			.saveState(true)
-			.partitions(0)
-			.name("inbound-customers")
-			.build();
-	}
-
-
-	@Bean
-	Job job() throws Exception {
-		return this.jobBuilder
-			.get("job")
-			.start(one())
-			.incrementer(new RunIdIncrementer())
-			.build();
-	}
-
-
 }
-

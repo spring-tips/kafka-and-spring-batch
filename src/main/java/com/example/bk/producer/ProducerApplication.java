@@ -1,4 +1,4 @@
-package com.example.bk.writer;
+package com.example.bk.producer;
 
 import com.example.bk.Customer;
 import lombok.RequiredArgsConstructor;
@@ -17,61 +17,58 @@ import org.springframework.batch.item.kafka.builder.KafkaItemWriterBuilder;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
-import org.springframework.core.convert.converter.Converter;
 import org.springframework.kafka.core.KafkaTemplate;
 
-import java.util.UUID;
 import java.util.concurrent.atomic.AtomicLong;
 
+@EnableBatchProcessing
 @SpringBootApplication
 @RequiredArgsConstructor
-@EnableBatchProcessing
-public class WriterApplication {
+public class ProducerApplication {
 
-	private final StepBuilderFactory stepBuilder;
-	private final JobBuilderFactory jobBuilder;
+	public static void main(String args[]) {
+		SpringApplication.run(ProducerApplication.class, args);
+	}
+
+	private final JobBuilderFactory jobBuilderFactory;
+	private final StepBuilderFactory stepBuilderFactory;
 	private final KafkaTemplate<Long, Customer> template;
 
 	@Bean
 	Job job() {
-		return this.jobBuilder
-			.get("files-to-kafka")
-			.start(fileToKafka())
+		return this.jobBuilderFactory
+			.get("job")
+			.start(start())
 			.incrementer(new RunIdIncrementer())
 			.build();
 	}
 
 	@Bean
 	KafkaItemWriter<Long, Customer> kafkaItemWriter() {
-		var ids = new AtomicLong();
 		return new KafkaItemWriterBuilder<Long, Customer>()
-			.itemKeyMapper(new Converter<Customer, Long>() {
-				@Override
-				public Long convert(Customer customer) {
-					return ids.incrementAndGet();
-				}
-			})
 			.kafkaTemplate(template)
+			.itemKeyMapper(Customer::getId)
 			.build();
 	}
 
+
 	@Bean
-	Step fileToKafka() {
+	Step start() {
 
+		var id = new AtomicLong();
 		var reader = new ItemReader<Customer>() {
-
-			private final AtomicLong counter = new AtomicLong();
 
 			@Override
 			public Customer read() {
-				if (this.counter.incrementAndGet() < 10_100) {
-					return new Customer(UUID.randomUUID().toString(), name());
-				}
+
+				if (id.incrementAndGet() < 10_1000)
+					return new Customer(id.get(), Math.random() > .5 ? "Jane" : "Jose");
+
 				return null;
 			}
 		};
 
-		return this.stepBuilder
+		return this.stepBuilderFactory
 			.get("s1")
 			.<Customer, Customer>chunk(10)
 			.reader(reader)
@@ -79,11 +76,4 @@ public class WriterApplication {
 			.build();
 	}
 
-	String name() {
-		return Math.random() > .5 ? "Jane" : "John";
-	}
-
-	public static void main(String args[]) {
-		SpringApplication.run(WriterApplication.class, args);
-	}
 }
